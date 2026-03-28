@@ -1478,6 +1478,2022 @@ function exportarDesempeno(){
         copiarTextoAlternativo(texto);
     }
 }
+// ==================== BALANCE ====================
+function cargarBalance(){
+    const ahora = new Date();
+    const mesActual = ahora.getMonth();
+    const añoActual = ahora.getFullYear();
+    const nombreMes = ahora.toLocaleDateString('es-CL', { month: 'long', year: 'numeric' });
+    document.getElementById("balanceFecha").innerHTML = nombreMes.charAt(0).toUpperCase() + nombreMes.slice(1);
+    
+    const historial = JSON.parse(localStorage.getItem("historial")) || [];
+    const egresos = JSON.parse(localStorage.getItem("egresos")) || [];
+    
+    const pedidosMes = historial.filter(p => {
+        if(!p.fecha) return false;
+        const partes = p.fecha.split('-');
+        if(partes.length !== 3) return false;
+        return parseInt(partes[1]) === mesActual + 1 && parseInt(partes[2]) === añoActual;
+    });
+    
+    const egresosMes = egresos.filter(e => {
+        if(!e.fecha) return false;
+        const partes = e.fecha.split('-');
+        if(partes.length !== 3) return false;
+        return parseInt(partes[1]) === mesActual + 1 && parseInt(partes[2]) === añoActual;
+    });
+    
+    let totalIngresos = 0;
+    pedidosMes.forEach(p => totalIngresos += p.venta || 0);
+    let totalEgresos = 0;
+    egresosMes.forEach(e => totalEgresos += e.total || 0);
+    const utilidad = totalIngresos - totalEgresos;
+    const margen = totalIngresos > 0 ? (utilidad / totalIngresos * 100) : 0;
+    
+    document.getElementById("balanceIngresos").innerHTML = CLP(totalIngresos);
+    document.getElementById("balanceCantidadPedidos").innerHTML = `${pedidosMes.length} pedidos`;
+    document.getElementById("balanceEgresos").innerHTML = CLP(totalEgresos);
+    document.getElementById("balanceUtilidad").innerHTML = CLP(utilidad);
+    document.getElementById("balanceMargen").innerHTML = `Margen: ${margen.toFixed(0)}%`;
+    
+    // Detalle de egresos mejorado
+    const detalleEgresos = document.getElementById("detalleEgresos");
+    if(egresosMes.length === 0){
+        detalleEgresos.innerHTML = '<tr><td colspan="8" style="text-align:center; color:var(--gray-500);">No hay compras registradas este mes</td></tr>';
+    } else {
+        detalleEgresos.innerHTML = "";
+        egresosMes.forEach(e => {
+            let detalleCantidad = "";
+            if(e.tipoCompra === "medidas"){
+                detalleCantidad = `A:${e.cantidadAncho || 0} / Al:${e.cantidadAlto || 0} = ${e.cantidad} pzs`;
+            } else {
+                detalleCantidad = `${e.cantidad} ${e.unidad}`;
+            }
+            
+            detalleEgresos.innerHTML += `
+                <tr>
+                    <td>${e.fecha} ${e.hora || ""}</td>
+                    <td><span style="background:var(--gray-200); padding:2px 8px; border-radius:12px; font-size:11px;">${e.categoria || "Otros"}</span></td>
+                    <td><strong>${e.material || e.concepto}</strong></td>
+                    <td>${detalleCantidad}</td>
+                    <td style="color:var(--primary); font-weight:600;">${CLP(e.total)}</td>
+                    <td>${e.proveedor || "-"}</td>
+                    <td>${e.factura || "-"}</td>
+                    <td><button onclick="eliminarCompraBalance(${e.id})" class="btn-danger" style="padding:4px 12px;">🗑️</button></td>
+                </tr>
+            `;
+        });
+        detalleEgresos.innerHTML += `<tr style="background:var(--gray-100);"><td colspan="4"><strong>TOTAL EGRESOS</strong></td><td colspan="4"><strong>${CLP(totalEgresos)}</strong></td></tr>`;
+    }
+    
+    // Comparativa mensual (últimos 6 meses)
+    const ultimos6Meses = [];
+    for(let i = 5; i >= 0; i--){
+        const fecha = new Date(añoActual, mesActual - i, 1);
+        const mes = fecha.getMonth() + 1;
+        const año = fecha.getFullYear();
+        const nombreMesCorto = fecha.toLocaleDateString('es-CL', { month: 'short' });
+        let ingresos = 0, egresosHist = 0;
+        historial.forEach(p => {
+            if(!p.fecha) return;
+            const partes = p.fecha.split('-');
+            if(partes.length !== 3) return;
+            if(parseInt(partes[1]) === mes && parseInt(partes[2]) === año) ingresos += p.venta || 0;
+        });
+        egresos.forEach(e => {
+            if(!e.fecha) return;
+            const partes = e.fecha.split('-');
+            if(partes.length !== 3) return;
+            if(parseInt(partes[1]) === mes && parseInt(partes[2]) === año) egresosHist += e.total || 0;
+        });
+        const utilidadMes = ingresos - egresosHist;
+        const margenMes = ingresos > 0 ? (utilidadMes / ingresos * 100) : 0;
+        ultimos6Meses.push({ nombre: nombreMesCorto, ingresos, egresos: egresosHist, utilidad: utilidadMes, margen: margenMes });
+    }
+    
+    const comparativaBody = document.getElementById("comparativaMensual");
+    comparativaBody.innerHTML = "";
+    ultimos6Meses.forEach(m => {
+        comparativaBody.innerHTML += `
+            <tr>
+                <td><strong>${m.nombre}</strong></td>
+                <td>${CLP(m.ingresos)}</td>
+                <td>${CLP(m.egresos)}</td>
+                <td style="color:${m.utilidad >= 0 ? 'var(--success)' : 'var(--danger)'}">${CLP(m.utilidad)}</td>
+                <td>${m.margen.toFixed(0)}%</td>
+            </tr>
+        `;
+    });
+}
+
+function registrarCompraBalance(){
+    // Categorías con materiales desde las tablas de costos
+    const categorias = {
+        "1": { nombre: "Aluminio", items: costosTemp.aluminio.map(a => ({ nombre: a.nombre, unidad: "pieza" })), tipoCompra: "medidas" },
+        "2": { nombre: "Vidrios", items: costosTemp.vidrios.map(v => ({ nombre: v.nombre, unidad: "planchas" })), tipoCompra: "simple" },
+        "3": { nombre: "Herrajes", items: costosTemp.fijos.map(f => ({ nombre: f.nombre, unidad: "uds" })), tipoCompra: "simple" },
+        "4": { nombre: "Variables", items: costosTemp.variables.map(v => ({ nombre: v.nombre, unidad: "metros" })), tipoCompra: "simple" },
+        "5": { nombre: "Otros", items: [{ nombre: "Otros materiales", unidad: "uds" }], tipoCompra: "simple" }
+    };
+    
+    // Paso 1: Seleccionar categoría
+    const opcionesCategoria = Object.keys(categorias).map(key => `${key} - ${categorias[key].nombre}`).join("\n");
+    const categoriaSeleccion = prompt(`📁 Seleccione categoría:\n${opcionesCategoria}`, "1");
+    if(!categoriaSeleccion) return;
+    
+    const categoria = categorias[categoriaSeleccion];
+    if(!categoria) return;
+    
+    let materialSeleccionado = null;
+    let cantidad = 0, unidad = "", total = 0, precioUnitario = 0;
+    let cantidadAncho = 0, cantidadAlto = 0;
+    
+    if(categoriaSeleccion !== "5"){
+        // Paso 2: Seleccionar material específico
+        const opcionesMaterial = categoria.items.map((item, i) => `${i+1} - ${item.nombre}`).join("\n");
+        const materialIndex = prompt(`📦 Seleccione material (${categoria.nombre}):\n${opcionesMaterial}`, "1");
+        if(!materialIndex) return;
+        
+        const idx = parseInt(materialIndex) - 1;
+        if(idx >= 0 && idx < categoria.items.length){
+            materialSeleccionado = categoria.items[idx];
+            unidad = materialSeleccionado.unidad;
+        } else {
+            return;
+        }
+    } else {
+        // Para "Otros", pedir concepto manual
+        materialSeleccionado = { nombre: prompt("📦 Concepto de la compra:", "Compra de materiales") };
+        if(!materialSeleccionado.nombre) return;
+        unidad = prompt("📏 Unidad (m, planchas, uds, kg):", "uds");
+        if(!unidad) return;
+    }
+    
+    // === DIFERENCIA PRINCIPAL: COMPRA POR MEDIDAS (Aluminio) vs COMPRA SIMPLE ===
+    if(categoria.tipoCompra === "medidas"){
+        // Compra por medidas (Aluminio - se compran perfiles por cantidad de ancho y alto)
+        const anchoInput = prompt(`📏 Cantidad de ANCHO comprada:`, "0");
+        if(!anchoInput || isNaN(parseFloat(anchoInput))) return;
+        cantidadAncho = parseFloat(anchoInput);
+        
+        const altoInput = prompt(`📏 Cantidad de ALTO comprada:`, "0");
+        if(!altoInput || isNaN(parseFloat(altoInput))) return;
+        cantidadAlto = parseFloat(altoInput);
+        
+        const totalInput = prompt(`💰 Precio TOTAL pagado por la compra (CLP):`, "0");
+        if(!totalInput || isNaN(parseFloat(totalInput))) return;
+        total = parseFloat(totalInput);
+        
+        // Calcular total de piezas y precio por pieza
+        cantidad = cantidadAncho + cantidadAlto;
+        precioUnitario = total / cantidad;
+        
+        alert(`📊 Resumen de compra:\n📏 Cantidad ancho: ${cantidadAncho}\n📏 Cantidad alto: ${cantidadAlto}\n📦 Total piezas: ${cantidad}\n💰 Total pagado: ${CLP(total)}\n💵 Precio por pieza: ${CLP(precioUnitario)}`);
+        
+    } else {
+        // Compra simple (Vidrios, Herrajes, Variables, Otros)
+        const cantidadInput = prompt(`🔢 Cantidad (${unidad}):`, "1");
+        if(!cantidadInput || isNaN(parseFloat(cantidadInput))) return;
+        cantidad = parseFloat(cantidadInput);
+        
+        const precioInput = prompt(`💰 Precio unitario (CLP) para ${materialSeleccionado.nombre}:`, "0");
+        if(!precioInput || isNaN(parseFloat(precioInput))) return;
+        precioUnitario = parseFloat(precioInput);
+        
+        total = cantidad * precioUnitario;
+    }
+    
+    // Paso: Proveedor (opcional)
+    const proveedor = prompt("🏢 Proveedor (opcional):", "Sin especificar");
+    if(proveedor === null) return;
+    
+    // Paso: Número de factura (opcional)
+    const factura = prompt("📄 N° Factura/Boleta (opcional):", "");
+    if(factura === null) return;
+    
+    const ahora = new Date();
+    const fecha = ahora.toLocaleDateString("es-CL");
+    const hora = ahora.toLocaleTimeString("es-CL", {hour:'2-digit', minute:'2-digit'});
+    
+    const nuevoEgreso = {
+        id: Date.now(),
+        categoria: categoria.nombre,
+        material: materialSeleccionado.nombre,
+        concepto: materialSeleccionado.nombre,
+        unidad: unidad,
+        cantidad: cantidad,
+        cantidadAncho: cantidadAncho,
+        cantidadAlto: cantidadAlto,
+        precioUnitario: precioUnitario,
+        total: total,
+        tipoCompra: categoria.tipoCompra,
+        proveedor: proveedor || "Sin especificar",
+        factura: factura || "N/A",
+        fecha: fecha,
+        hora: hora,
+        timestamp: ahora.getTime()
+    };
+    
+    let egresos = JSON.parse(localStorage.getItem("egresos")) || [];
+    egresos.unshift(nuevoEgreso);
+    localStorage.setItem("egresos", JSON.stringify(egresos));
+    
+    // Mensaje de confirmación adaptado
+    let mensaje = `✅ Compra registrada:\n📁 ${categoria.nombre}\n📦 ${materialSeleccionado.nombre}\n`;
+    if(categoria.tipoCompra === "medidas"){
+        mensaje += `📏 Ancho: ${cantidadAncho}\n📏 Alto: ${cantidadAlto}\n📦 Total piezas: ${cantidad}\n💰 Total: ${CLP(total)}\n💵 Precio por pieza: ${CLP(precioUnitario)}\n`;
+    } else {
+        mensaje += `🔢 ${cantidad} ${unidad}\n💰 Total: ${CLP(total)}\n`;
+    }
+    mensaje += `🏢 ${proveedor}\n📄 ${factura}`;
+    
+    alert(mensaje);
+    cargarBalance();
+}
+
+function eliminarCompraBalance(id){
+    if(!confirm("¿Eliminar esta compra permanentemente?")) return;
+    let egresos = JSON.parse(localStorage.getItem("egresos")) || [];
+    const index = egresos.findIndex(e => e.id === id);
+    if(index !== -1){
+        const compraEliminada = egresos[index];
+        egresos.splice(index, 1);
+        localStorage.setItem("egresos", JSON.stringify(egresos));
+        alert(`✅ Compra eliminada: ${compraEliminada.concepto || compraEliminada.material} - ${CLP(compraEliminada.total)}`);
+        cargarBalance();
+    }
+}
+
+function exportarBalance(){
+    const ahora = new Date();
+    const mesActual = ahora.toLocaleDateString('es-CL', { month: 'long', year: 'numeric' });
+    const historial = JSON.parse(localStorage.getItem("historial")) || [];
+    const egresos = JSON.parse(localStorage.getItem("egresos")) || [];
+    const mes = ahora.getMonth() + 1;
+    const año = ahora.getFullYear();
+    
+    const pedidosMes = historial.filter(p => {
+        if(!p.fecha) return false;
+        const partes = p.fecha.split('-');
+        if(partes.length !== 3) return false;
+        return parseInt(partes[1]) === mes && parseInt(partes[2]) === año;
+    });
+    
+    const egresosMes = egresos.filter(e => {
+        if(!e.fecha) return false;
+        const partes = e.fecha.split('-');
+        if(partes.length !== 3) return false;
+        return parseInt(partes[1]) === mes && parseInt(partes[2]) === año;
+    });
+    
+    let totalIngresos = 0, totalEgresos = 0;
+    pedidosMes.forEach(p => totalIngresos += p.venta || 0);
+    egresosMes.forEach(e => totalEgresos += e.total || 0);
+    const utilidad = totalIngresos - totalEgresos;
+    const margen = totalIngresos > 0 ? (utilidad / totalIngresos * 100) : 0;
+    
+    let texto = `=== BALANCE MENSUAL - ${mesActual.toUpperCase()} ===\n\n`;
+    texto += `RESUMEN FINANCIERO\n─────────────────────────\n`;
+    texto += `💰 INGRESOS: ${CLP(totalIngresos)} (${pedidosMes.length} pedidos)\n`;
+    texto += `💸 EGRESOS: ${CLP(totalEgresos)}\n`;
+    texto += `📈 UTILIDAD NETA: ${CLP(utilidad)}\n`;
+    texto += `📊 MARGEN: ${margen.toFixed(0)}%\n\n`;
+    
+    texto += `DETALLE DE INGRESOS\n─────────────────────────\n`;
+    pedidosMes.forEach((p, i) => texto += `${i+1}. ${p.cliente} - ${p.ventana} - ${CLP(p.venta)}\n`);
+    texto += `TOTAL INGRESOS: ${CLP(totalIngresos)}\n\n`;
+    
+    texto += `DETALLE DE EGRESOS\n─────────────────────────\n`;
+    egresosMes.forEach((e, i) => {
+        let detalleCantidad = "";
+        if(e.tipoCompra === "medidas"){
+            detalleCantidad = `${e.cantidadAncho || 0} ancho + ${e.cantidadAlto || 0} alto = ${e.cantidad} pzs`;
+        } else {
+            detalleCantidad = `${e.cantidad} ${e.unidad}`;
+        }
+        texto += `${i+1}. [${e.categoria || "Otros"}] ${e.material || e.concepto} - ${detalleCantidad} - ${CLP(e.total)} (${e.fecha})\n`;
+        if(e.proveedor && e.proveedor !== "Sin especificar") texto += `   Proveedor: ${e.proveedor}\n`;
+        if(e.factura && e.factura !== "N/A") texto += `   Factura: ${e.factura}\n`;
+    });
+    texto += `TOTAL EGRESOS: ${CLP(totalEgresos)}\n\n=======================`;
+    
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(() => alert("✅ Balance copiado al portapapeles")).catch(() => copiarTextoAlternativo(texto));
+    } else {
+        copiarTextoAlternativo(texto);
+    }
+}
+// ==================== COSTOS ====================
+function renderCostos(){ renderVidrios(); renderAluminio(); renderVariables(); renderFijos(); }
+
+function renderVidrios(){ 
+    const t = document.getElementById("tablaVidrios"); 
+    if(!t) return; 
+    const tbody = t.querySelector('tbody') || (() => { const tb = document.createElement('tbody'); t.appendChild(tb); return tb; })();
+    tbody.innerHTML = costosTemp.vidrios.map((v,i)=>`
+          <tr>
+              <td><strong>${v.nombre}</strong></td>
+              <td style="color: var(--primary); font-weight: 600;">${CLP(v.area ? v.plancha / v.area : 0)}</td>
+              <td><input type="number" value="${v.plancha}" oninput="updateVidrio(${i}, this.value)"></td>
+              <td><input type="number" value="${v.area}" oninput="updateVidrioArea(${i}, this.value)"></td>
+          </tr>
+    `).join(''); 
+}
+
+function renderAluminio(){ 
+    const t = document.getElementById("tablaAluminio"); 
+    if(!t) return; 
+    const tbody = t.querySelector('tbody') || (() => { const tb = document.createElement('tbody'); t.appendChild(tb); return tb; })();
+    tbody.innerHTML = costosTemp.aluminio.map((a,i)=>`
+          <tr>
+              <td><strong>${a.nombre}</strong></td>
+              <td style="color: var(--primary); font-weight: 600;">${CLP(a.metros ? a.tira / a.metros : 0)}</td>
+              <td><input type="number" value="${a.tira}" oninput="updateAluminio(${i}, this.value)"></td>
+              <td><input type="number" value="${a.metros}" oninput="updateAluminioMetros(${i}, this.value)"></td>
+          </tr>
+    `).join(''); 
+}
+
+function renderVariables(){ 
+    const t = document.getElementById("tablaVariables"); 
+    if(!t) return; 
+    const tbody = t.querySelector('tbody') || (() => { const tb = document.createElement('tbody'); t.appendChild(tb); return tb; })();
+    tbody.innerHTML = costosTemp.variables.map((v,i)=>`
+          <tr>
+              <td><strong>${v.nombre}</strong></td>
+              <td style="color: var(--primary); font-weight: 600;">${CLP(v.metros ? v.base / v.metros : 0)}</td>
+              <td><input type="number" value="${v.base}" oninput="updateVar(${i}, this.value)"></td>
+              <td><input type="number" value="${v.metros}" oninput="updateVarMetros(${i}, this.value)"></td>
+          </tr>
+    `).join(''); 
+}
+
+function renderFijos(){ 
+    const t = document.getElementById("tablaFijos"); 
+    if(!t) return; 
+    const tbody = t.querySelector('tbody') || (() => { const tb = document.createElement('tbody'); t.appendChild(tb); return tb; })();
+    tbody.innerHTML = costosTemp.fijos.map((f,i)=>`
+          <tr>
+              <td><strong>${f.nombre}</strong></td>
+              <td><input type="number" value="${f.cantidad || 0}" oninput="updateFijoCantidad(${i}, this.value)"></td>
+              <td><input type="number" value="${f.precio || 0}" oninput="updateFijoPrecio(${i}, this.value)"></td>
+              <td style="color: var(--primary); font-weight: 600;">${CLP((f.cantidad || 0) * (f.precio || 0))}</td>
+          </tr>
+    `).join(''); 
+}
+
+function confirmarCostos(){ costos = JSON.parse(JSON.stringify(costosTemp)); localStorage.setItem("costos", JSON.stringify(costos)); renderCostos(); alert("✅ Costos actualizados correctamente"); calcular(); }
+
+function updateVidrio(i,val){ costosTemp.vidrios[i].plancha = parseFloat(val)||0; calcular(); }
+function updateVidrioArea(i,val){ costosTemp.vidrios[i].area = parseFloat(val)||0; calcular(); }
+function updateAluminio(i,val){ costosTemp.aluminio[i].tira = parseFloat(val)||0; calcular(); }
+function updateAluminioMetros(i,val){ costosTemp.aluminio[i].metros = parseFloat(val)||0; calcular(); }
+function updateVar(i,val){ costosTemp.variables[i].base = parseFloat(val)||0; calcular(); }
+function updateVarMetros(i,val){ costosTemp.variables[i].metros = parseFloat(val)||0; calcular(); }
+function updateFijoCantidad(i,val){ costosTemp.fijos[i].cantidad = parseFloat(val)||0; calcular(); }
+function updateFijoPrecio(i,val){ costosTemp.fijos[i].precio = parseFloat(val)||0; calcular(); }
+
+// ==================== HISTORIAL ====================
+function mostrarHistorial(){  
+    const cont = document.getElementById("historial");  
+    if(!cont) return;
+    let historial = JSON.parse(localStorage.getItem("historial")) || [];  
+    const filtroEstado = document.getElementById("filtroEstado")?.value || "todos";  
+    const ordenFecha = document.getElementById("filtroOrden")?.value || "nuevo";  
+    const busqueda = document.getElementById("buscadorHistorial")?.value.toLowerCase() || "";
+  
+    if(filtroEstado !== "todos") historial = historial.filter(h => h.estado === filtroEstado);  
+    if(busqueda) historial = historial.filter(h => (h.cliente || "").toLowerCase().includes(busqueda));
+    historial.sort((a,b) => ordenFecha === "nuevo" ? b.timestamp - a.timestamp : a.timestamp - b.timestamp);
+  
+    if(historial.length === 0){ cont.innerHTML = "<div style='text-align:center; padding:40px; color:var(--gray-500);'>No hay pedidos registrados</div>"; actualizarContadorHistorial(); return; }
+  
+    cont.innerHTML = "";  
+    historial.forEach((h)=>{  
+        let colorBarra = h.estado === "cotizacion" ? "#1e3a5f" : h.estado === "fabricacion" ? "#ed6c02" : h.estado === "terminado" ? "#2e7d32" : "#64748b";
+        let textoEstado = h.estado === "cotizacion" ? "Cotización" : h.estado === "fabricacion" ? "Fabricación" : h.estado === "terminado" ? "Terminado" : "Entregado";
+        let div = document.createElement("div");  
+        div.className = "card";  
+        div.style.borderLeft = `4px solid ${colorBarra}`;
+        div.innerHTML = `
+            <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:16px;">
+                <div><strong style="font-size:18px;">${h.cliente || "Sin cliente"}</strong></div>
+                <div style="text-align:right;">
+                    <div style="font-size:13px; color:var(--gray-500);">${h.fecha || ""}</div>
+                    <div style="font-size:12px; color:var(--gray-400);">${h.hora || ""}</div>
+                    ${h.ultimaEdicion ? `<div style="font-size:11px; color:var(--gray-400); margin-top:4px;">Editado: ${h.ultimaEdicion}</div>` : ''}
+                </div>
+            </div>
+            <div style="margin-bottom:12px;">
+                <div style="font-weight:600; margin-bottom:4px;">${h.ventana}</div>
+                <div style="font-size:14px; color:var(--gray-600);">Vidrio: ${h.vidrio || "-"}</div>
+                <div style="font-size:14px; color:var(--gray-600);">Medidas: ${h.ancho} x ${h.alto} m</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:16px;">
+                <div style="font-size:24px; font-weight:700; color:var(--primary);">${CLP(h.venta)}</div>
+                <div style="font-size:13px; color:var(--gray-500);">Utilidad ${Math.round(h.porcentaje || 100)}%</div>
+            </div>
+            <div style="display:flex; justify-content:space-between; align-items:center; padding-top:12px; border-top:1px solid var(--gray-300);">
+                <div style="display:flex; align-items:center; gap:8px;">
+                    <div style="width:10px; height:10px; border-radius:50%; background:${colorBarra};"></div>
+                    <span style="font-size:13px; font-weight:500; color:${colorBarra};">${textoEstado}</span>
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <button onclick="cargarPedido(${h.id})" class="btn-icon" title="Ver pedido">👁</button>
+                    <button onclick="cambiarEstado(${h.id})" class="btn-icon" title="Cambiar estado">🔄</button>
+                    <button onclick="eliminarHistorial(${h.id})" class="btn-icon" title="Eliminar">❌</button>
+                    <button onclick="exportarPedidoTexto(${h.id})" class="btn-icon" title="Copiar cotización">📋</button>
+                </div>
+            </div>
+        `;  
+        cont.appendChild(div);  
+    });  
+    actualizarContadorHistorial();
+}  
+
+function actualizarContadorHistorial(){
+    const historial = JSON.parse(localStorage.getItem("historial")) || [];
+    const total = historial.length;
+    const cotizacion = historial.filter(h => h.estado === "cotizacion").length;
+    const fabricacion = historial.filter(h => h.estado === "fabricacion").length;
+    const terminado = historial.filter(h => h.estado === "terminado").length;
+    const entregado = historial.filter(h => h.estado === "entregado").length;
+    const contadorDiv = document.getElementById("contadorPedidos");
+    if(contadorDiv) contadorDiv.innerHTML = `Total: ${total} pedidos | Cotización: ${cotizacion} | Fabricación: ${fabricacion} | Terminado: ${terminado} | Entregado: ${entregado}`;
+}
+
+function cargarPedido(id){  
+    let historial = JSON.parse(localStorage.getItem("historial")) || [];  
+    const pedido = historial.find(p => p.id === id);  
+    if(!pedido){ alert("Pedido no encontrado"); return; }  
+    mostrarSeccion('principal');  
+    pedidoEditando = id;  
+    document.getElementById("clienteInput").value = pedido.cliente || "";  
+    anchoInput.value = pedido.ancho;  
+    altoInput.value = pedido.alto;  
+    utilidadInput.value = pedido.porcentaje;  
+    calcular();  
+    window.scrollTo({top:0, behavior:"smooth"});  
+}
+
+function guardarSeleccion(data){  
+    if(!data.cliente || data.cliente.trim() === ""){ alert("❌ Ingrese el nombre del cliente"); return; }
+    if(!data.ancho || data.ancho <= 0){ alert("❌ Ingrese un ancho válido"); return; }
+    if(!data.alto || data.alto <= 0){ alert("❌ Ingrese un alto válido"); return; }
+    if(!confirm("¿Guardar este pedido?")) return;  
+    let historial = JSON.parse(localStorage.getItem("historial")) || [];  
+    const ahora = new Date();  
+    
+    if(pedidoEditando){  
+        const index = historial.findIndex(p => p.id === pedidoEditando);  
+        if(index !== -1){  
+            const fechaOriginal = historial[index].fecha, horaOriginal = historial[index].hora;
+            const editadoHistorial = historial[index].editado || [];
+            editadoHistorial.push({ fecha: ahora.toLocaleDateString("es-CL"), hora: ahora.toLocaleTimeString("es-CL", {hour:'2-digit', minute:'2-digit'}) });
+            historial[index] = { ...historial[index], ...data, fecha: fechaOriginal, hora: horaOriginal, editado: editadoHistorial, ultimaEdicion: ahora.toLocaleDateString("es-CL") + " " + ahora.toLocaleTimeString("es-CL", {hour:'2-digit', minute:'2-digit'}) };  
+        }  
+        pedidoEditando = null;  
+        localStorage.setItem("historial", JSON.stringify(historial));  
+        mostrarHistorial();  
+        cargarDashboard();
+        cargarBalance();
+        mostrarSeccion("historialSeccion");  
+        return;  
+    } else {  
+        data.fecha = ahora.toLocaleDateString("es-CL");  
+        data.hora = ahora.toLocaleTimeString("es-CL", {hour:'2-digit', minute:'2-digit'});  
+        data.id = ahora.getTime();  
+        data.timestamp = data.id;  
+        data.estado = "cotizacion";
+        data.editado = [];
+        historial.unshift(data);  
+    }  
+    localStorage.setItem("historial", JSON.stringify(historial));  
+    mostrarHistorial();  
+    cargarDashboard();
+    cargarBalance();
+}  
+
+function eliminarHistorial(id){  
+    if(!confirm("¿Eliminar este pedido permanentemente?")) return;  
+    let historial = JSON.parse(localStorage.getItem("historial")) || [];  
+    historial = historial.filter(h => h.id !== id);  
+    localStorage.setItem("historial", JSON.stringify(historial));  
+    mostrarHistorial();  
+    cargarDashboard();
+    cargarBalance();
+}  
+
+function cambiarEstado(id){  
+    let historial = JSON.parse(localStorage.getItem("historial")) || [];  
+    const estados = ["cotizacion", "fabricacion", "terminado", "entregado"];  
+    const index = historial.findIndex(p => p.id === id);  
+    if(index === -1) return;  
+    let actual = (historial[index].estado || "cotizacion").toLowerCase().trim();  
+    let pos = estados.indexOf(actual);  
+    let siguiente = estados[pos + 1] || "entregado";  
+    const nombres = { cotizacion: "Cotización", fabricacion: "Fabricación", terminado: "Terminado", entregado: "Entregado" };
+    if(confirm(`¿Cambiar estado de "${nombres[actual]}" a "${nombres[siguiente]}"?`)){
+        historial[index].estado = siguiente;
+        localStorage.setItem("historial", JSON.stringify(historial));
+        mostrarHistorial();
+        cargarDashboard();
+        cargarBalance();
+    }
+}  
+
+function exportarPedidoTexto(id){
+    let historial = JSON.parse(localStorage.getItem("historial")) || [];
+    const pedido = historial.find(p => p.id === id);
+    if(!pedido) return;
+    let texto = `=== COTIZACIÓN ===\nCliente: ${pedido.cliente}\nFecha: ${pedido.fecha} ${pedido.hora}\nEstado: ${pedido.estado === "cotizacion" ? "Cotización" : pedido.estado === "fabricacion" ? "Fabricación" : pedido.estado === "terminado" ? "Terminado" : "Entregado"}\n─────────────────────────\nVentana: ${pedido.ventana}\nVidrio: ${pedido.vidrio}\nMedidas: ${pedido.ancho} x ${pedido.alto} m\n─────────────────────────\nTotal: ${CLP(pedido.venta)}\nUtilidad: ${Math.round(pedido.porcentaje || 100)}%\n=======================`;
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(() => alert("✅ Cotización copiada")).catch(() => copiarTextoAlternativo(texto));
+    } else {
+        copiarTextoAlternativo(texto);
+    }
+}
+
+// ==================== NAVEGACIÓN ====================
+function mostrarSeccion(seccion){  
+    document.getElementById("principal").style.display = "none";  
+    const dashboard = document.getElementById("dashboard");
+    if(dashboard) dashboard.style.display = "none";
+    document.getElementById("historialSeccion").style.display = "none";  
+    document.getElementById("config").style.display = "none";  
+    const balance = document.getElementById("balance");
+    if(balance) balance.style.display = "none";
+    document.getElementById(seccion).style.display = "block";
+    
+    const botones = document.querySelectorAll(".menu button");
+    botones.forEach(btn => btn.classList.remove("active"));
+    const mapaBotones = { "principal": "btnCalculadora", "historialSeccion": "btnHistorial", "dashboard": "btnDesempeno", "balance": "btnBalance", "config": "btnCostos" };
+    const botonId = mapaBotones[seccion];
+    if(botonId) document.getElementById(botonId).classList.add("active");
+    
+    if(seccion === "dashboard") cargarDashboard();
+    if(seccion === "principal") calcular();
+    if(seccion === "balance") cargarBalance();
+}
+
+const buscador = document.getElementById("buscadorHistorial");
+if(buscador) buscador.addEventListener("input", mostrarHistorial);
+
+// ==================== INICIALIZACIÓN ====================
+mostrarHistorial();
+renderCostos();
+cargarDashboard();
+cargarBalance();
+calcular();
+
+</script>  
+<script> if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js"); </script>  
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+</body>  
+</html>    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1);
+    --radius: 12px;
+    --radius-sm: 8px;
+}  
+
+body {  
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;  
+    background: var(--gray-200);  
+    margin: 0;  
+    color: var(--gray-800);
+}  
+
+/* Header */
+.app-header {
+    background: white;
+    border-bottom: 1px solid var(--gray-300);
+    padding: 0;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: var(--shadow-sm);
+}
+
+.app-header h1 {
+    background: linear-gradient(135deg, var(--primary) 0%, var(--primary-dark) 100%);
+    margin: 0;
+    padding: 20px 24px;
+    text-align: center;
+    font-size: 24px;
+    font-weight: 600;
+    color: white;
+    letter-spacing: -0.3px;
+    box-shadow: none;
+    position: static;
+}
+
+/* Menu */
+.menu {  
+    display: flex;  
+    justify-content: center;
+    gap: 8px;
+    background: white;  
+    padding: 12px 24px;  
+    flex-wrap: wrap;
+    border-bottom: 1px solid var(--gray-300);
+}  
+
+.menu button {  
+    border: none;  
+    background: transparent;  
+    font-size: 14px;  
+    font-weight: 500;  
+    color: var(--gray-600);  
+    padding: 8px 18px;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    border-radius: 30px;
+    letter-spacing: -0.2px;
+}  
+
+.menu button:hover {
+    background: var(--gray-200);
+    color: var(--primary);
+}  
+
+.menu button.active {  
+    background: var(--primary);  
+    color: white;  
+}  
+
+/* Cards */
+.card {  
+    background: white;  
+    border-radius: var(--radius);  
+    padding: 24px;  
+    margin: 20px;  
+    box-shadow: var(--shadow-md);  
+    border: 1px solid var(--gray-300);
+    transition: transform 0.1s ease, box-shadow 0.2s ease;
+}  
+
+.card:hover {
+    box-shadow: var(--shadow-lg);
+}
+
+.card h3 {  
+    margin: 0 0 20px 0;  
+    color: var(--gray-800);  
+    font-size: 18px;  
+    font-weight: 600;
+    letter-spacing: -0.2px;
+    border-left: 3px solid var(--primary);
+    padding-left: 16px;
+}  
+
+/* Inputs */
+.inputs {  
+    display: flex;  
+    justify-content: center;  
+    gap: 20px;  
+    padding: 20px 24px;  
+    flex-wrap: wrap;  
+    background: white;
+    margin: 20px 20px 0 20px;
+    border-radius: var(--radius);
+    border: 1px solid var(--gray-300);
+}  
+
+.input-group {  
+    display: flex;  
+    flex-direction: column;  
+    align-items: flex-start;  
+    gap: 6px;
+    flex: 1;
+    min-width: 120px;
+}  
+
+.input-group label {  
+    font-size: 12px;  
+    color: var(--gray-600);  
+    font-weight: 500;  
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}  
+
+input, select {  
+    padding: 12px 14px;  
+    font-size: 15px;  
+    width: 100%;  
+    border-radius: var(--radius-sm);  
+    border: 1px solid var(--gray-300);  
+    background: white;
+    transition: all 0.2s ease;
+    font-family: inherit;
+}  
+
+input:focus, select:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(30, 58, 95, 0.1);
+}
+
+/* Tablas */
+.tabla-wrapper {  
+    width: 100%;  
+    overflow-x: auto;  
+    border-radius: var(--radius-sm);  
+    margin-top: 16px;
+}  
+
+.tabla-costos {  
+    width: 100%;  
+    border-collapse: collapse;  
+    font-size: 14px;  
+}  
+
+.tabla-costos th {  
+    background: var(--gray-100);  
+    padding: 12px 16px;  
+    font-weight: 600;  
+    color: var(--gray-700);  
+    border-bottom: 2px solid var(--gray-300);  
+    text-align: left;
+}  
+
+.tabla-costos td {  
+    padding: 12px 16px;  
+    border-bottom: 1px solid var(--gray-300);  
+    text-align: left;  
+}  
+
+.tabla-costos tr:hover {  
+    background: var(--gray-100);  
+}  
+
+.tabla-costos input {  
+    width: 100px;  
+    padding: 8px;  
+    border-radius: var(--radius-sm);  
+    border: 1px solid var(--gray-300);  
+    text-align: center;  
+    font-size: 14px;  
+}  
+
+/* Vidrio grid (calculadora) */
+.vidrio {  
+    display: grid;  
+    grid-template-columns: 22% 22% 22% 22% 12%;  
+    align-items: center;  
+    border-bottom: 1px solid var(--gray-300);  
+    font-size: 14px;  
+}  
+
+.vidrio > div {  
+    text-align: center;  
+    padding: 14px 8px;  
+}  
+
+.vidrio > div:first-child {  
+    font-weight: 600;  
+    color: var(--gray-800);
+}  
+
+.vidrio > div:not(:last-child) {  
+    border-right: 1px solid var(--gray-300);  
+}  
+
+.fabricacion { color: var(--gray-700); font-weight: 500; }  
+.utilidad-neta { color: var(--success); font-weight: 500; }  
+.precio { color: var(--primary); font-weight: 700; }  
+
+/* Botones */
+button {
+    font-family: inherit;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+button:active {
+    transform: scale(0.98);
+}
+
+.btn-primary {
+    background: var(--primary);
+    color: white;
+    border: none;
+    padding: 12px 24px;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+    font-size: 14px;
+}
+
+.btn-primary:hover {
+    background: var(--primary-dark);
+}
+
+.btn-secondary {
+    background: white;
+    color: var(--gray-700);
+    border: 1px solid var(--gray-300);
+    padding: 12px 24px;
+    border-radius: var(--radius-sm);
+    font-weight: 500;
+}
+
+.btn-secondary:hover {
+    background: var(--gray-100);
+    border-color: var(--gray-400);
+}
+
+.btn-danger {
+    background: white;
+    color: var(--danger);
+    border: 1px solid var(--danger);
+    padding: 8px 16px;
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+}
+
+.btn-danger:hover {
+    background: var(--danger);
+    color: white;
+}
+
+.btn-icon {
+    background: transparent;
+    border: none;
+    font-size: 18px;
+    padding: 6px 8px;
+    border-radius: var(--radius-sm);
+    color: var(--gray-600);
+}
+
+.btn-icon:hover {
+    background: var(--gray-200);
+}
+
+/* Dashboard Cards */
+.dashboard-card {
+    background: linear-gradient(135deg, var(--gray-800) 0%, var(--gray-900) 100%);
+    color: white;
+    padding: 20px;
+    border-radius: var(--radius);
+    text-align: center;
+}
+
+.dashboard-card h4 {
+    margin: 0 0 8px 0;
+    font-size: 13px;
+    font-weight: 500;
+    opacity: 0.8;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.dashboard-card .valor {
+    font-size: 28px;
+    font-weight: 700;
+    margin: 8px 0;
+}
+
+.dashboard-card .variacion {
+    font-size: 12px;
+    opacity: 0.7;
+}
+
+/* Estado badges */
+.estado-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 500;
+    padding: 4px 12px;
+    border-radius: 30px;
+    background: var(--gray-100);
+}
+
+.estado-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+}
+
+.estado-cotizacion { background: var(--primary); }
+.estado-fabricacion { background: var(--warning); }
+.estado-terminado { background: var(--success); }
+.estado-entregado { background: var(--gray-500); }
+
+/* Filtros */
+.filtros-historial {
+    display: flex;
+    gap: 12px;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    margin: 0 20px 20px 20px;
+}
+
+.filtros-historial select,
+.filtros-historial input {
+    width: auto;
+    min-width: 150px;
+    padding: 10px 14px;
+    font-size: 13px;
+}
+
+/* Utilidades */
+.text-right {
+    text-align: right;
+}
+
+.mt-4 {
+    margin-top: 20px;
+}
+
+.mb-4 {
+    margin-bottom: 20px;
+}
+
+.grid-3 {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 20px;
+}
+
+hr {
+    border: none;
+    border-top: 1px solid var(--gray-300);
+    margin: 16px 0;
+}
+
+/* ========== ESTILOS PARA PESTAÑA COSTOS ========== */
+
+/* Contenedor principal de Costos - 2 columnas con tamaño adecuado */
+#config > div:first-child {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(380px, 1fr)) !important;
+    gap: 24px;
+    margin: 20px;
+}
+
+/* Asegurar que las tarjetas ocupen todo el ancho disponible */
+#config .card {
+    width: 100% !important;
+    min-width: 0 !important;
+    overflow: hidden;
+    box-sizing: border-box;
+    margin: 0 !important;
+    display: flex;
+    flex-direction: column;
+    height: auto;
+}
+
+/* Estilos para tablas de costos - alineación perfecta */
+#config .tabla-costos {
+    table-layout: fixed !important;
+    width: 100%;
+    border-collapse: collapse;
+}
+
+#config .tabla-costos th,
+#config .tabla-costos td {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: normal;
+    word-break: break-word;
+    padding: 10px 12px;
+}
+
+/* Vidrios - 4 columnas */
+#config #tablaVidrios th:nth-child(1),
+#config #tablaVidrios td:nth-child(1) { width: 30%; }
+#config #tablaVidrios th:nth-child(2),
+#config #tablaVidrios td:nth-child(2) { width: 20%; }
+#config #tablaVidrios th:nth-child(3),
+#config #tablaVidrios td:nth-child(3) { width: 25%; }
+#config #tablaVidrios th:nth-child(4),
+#config #tablaVidrios td:nth-child(4) { width: 25%; }
+
+/* Aluminio - 4 columnas */
+#config #tablaAluminio th:nth-child(1),
+#config #tablaAluminio td:nth-child(1) { width: 35%; }
+#config #tablaAluminio th:nth-child(2),
+#config #tablaAluminio td:nth-child(2) { width: 20%; }
+#config #tablaAluminio th:nth-child(3),
+#config #tablaAluminio td:nth-child(3) { width: 25%; }
+#config #tablaAluminio th:nth-child(4),
+#config #tablaAluminio td:nth-child(4) { width: 20%; }
+
+/* Variables - 4 columnas */
+#config #tablaVariables th:nth-child(1),
+#config #tablaVariables td:nth-child(1) { width: 35%; }
+#config #tablaVariables th:nth-child(2),
+#config #tablaVariables td:nth-child(2) { width: 20%; }
+#config #tablaVariables th:nth-child(3),
+#config #tablaVariables td:nth-child(3) { width: 25%; }
+#config #tablaVariables th:nth-child(4),
+#config #tablaVariables td:nth-child(4) { width: 20%; }
+
+/* Fijos - 4 columnas */
+#config #tablaFijos th:nth-child(1),
+#config #tablaFijos td:nth-child(1) { width: 30%; }
+#config #tablaFijos th:nth-child(2),
+#config #tablaFijos td:nth-child(2) { width: 20%; }
+#config #tablaFijos th:nth-child(3),
+#config #tablaFijos td:nth-child(3) { width: 25%; }
+#config #tablaFijos th:nth-child(4),
+#config #tablaFijos td:nth-child(4) { width: 25%; }
+
+/* Scroll vertical para tablas grandes */
+#config .tabla-wrapper[style*="overflow-y"] {
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+/* Botón confirmar cambios */
+#config .btn-primary {
+    margin-top: 8px;
+}
+
+/* Responsive para móvil */
+@media (max-width: 900px) {
+    #config > div:first-child {
+        grid-template-columns: 1fr !important;
+        gap: 16px !important;
+        margin: 12px !important;
+    }
+    
+    #config .tabla-costos {
+        min-width: 100% !important;
+        table-layout: auto !important;
+    }
+    
+    #config .tabla-costos th,
+    #config .tabla-costos td {
+        white-space: nowrap;
+    }
+    
+    /* En móvil, los anchos fijos se desactivan para permitir scroll */
+    #config #tablaVidrios th,
+    #config #tablaVidrios td,
+    #config #tablaAluminio th,
+    #config #tablaAluminio td,
+    #config #tablaVariables th,
+    #config #tablaVariables td,
+    #config #tablaFijos th,
+    #config #tablaFijos td {
+        width: auto !important;
+    }
+    
+    #config .tabla-wrapper[style*="overflow-y"] {
+        max-height: 300px !important;
+    }
+}
+
+@media (max-width: 1200px) and (min-width: 901px) {
+    #config > div:first-child {
+        grid-template-columns: repeat(2, minmax(320px, 1fr)) !important;
+        gap: 20px;
+    }
+}
+
+/* Responsive general para todo el sitio */
+@media (max-width: 768px) {
+    .card {
+        margin: 12px;
+        padding: 18px;
+    }
+    
+    .inputs {
+        margin: 12px;
+        padding: 16px;
+    }
+    
+    .vidrio {
+        font-size: 12px;
+        grid-template-columns: 25% 25% 25% 25%;
+    }
+    
+    .vidrio > div:last-child {
+        display: none;
+    }
+    
+    .menu button {
+        padding: 6px 12px;
+        font-size: 12px;
+    }
+    
+    .dashboard-card .valor {
+        font-size: 20px;
+    }
+}
+
+</style> 
+</head>  
+<body>  
+
+<div class="app-header">
+    <h1>Gestor de Ventas | Aluminios Vázquez</h1>
+    <div class="menu">  
+        <button id="btnCalculadora" onclick="mostrarSeccion('principal')">📐 Calculadora</button>  
+        <button id="btnHistorial" onclick="mostrarSeccion('historialSeccion')">📋 Historial</button>  
+        <button id="btnDesempeno" onclick="mostrarSeccion('dashboard')">📊 Desempeño</button>  
+        <button id="btnBalance" onclick="mostrarSeccion('balance')">📈 Balance</button>  
+        <button id="btnCostos" onclick="mostrarSeccion('config')">⚙️ Costos</button>  
+    </div>  
+</div>
+
+<!-- Calculadora -->
+<div id="principal">  
+    <div class="inputs">  
+        <div class="input-group">  
+            <label>Cliente</label>  
+            <input id="clienteInput" type="text" placeholder="Nombre del cliente">  
+        </div>  
+        <div class="input-group">  
+            <label>Ancho (m)</label>  
+            <input id="ancho" type="number" step="0.01" placeholder="0.00">  
+        </div>  
+        <div class="input-group">  
+            <label>Alto (m)</label>  
+            <input id="alto" type="number" step="0.01" placeholder="0.00">  
+        </div>  
+        <div class="input-group">  
+            <label>Utilidad (%)</label>  
+            <input id="utilidadInput" type="number" value="100">  
+        </div>  
+    </div>  
+    <div id="contenedor"></div>  
+</div>  
+
+<<!-- Desempeño - Versión Ejecutiva -->
+<div id="dashboard" style="display:none">  
+    <div class="card" style="padding: 20px;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; flex-wrap: wrap; gap: 12px;">
+            <h3 style="margin: 0; border-left: none; padding-left: 0;">📊 Executive Dashboard</h3>
+            <div style="display: flex; gap: 8px;">
+                <select id="periodoDashboard" onchange="cargarDashboard()" style="width: auto; padding: 8px 12px; font-size: 13px;">
+                    <option value="mes">Este mes</option>
+                    <option value="trimestre">Último trimestre</option>
+                    <option value="semestre">Último semestre</option>
+                    <option value="anio">Último año</option>
+                </select>
+                <button onclick="exportarDesempeno()" class="btn-secondary" style="padding: 8px 16px;">📥 Exportar</button>
+            </div>
+        </div>
+        
+        <!-- KPIs principales con gradientes -->
+        <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; margin-bottom: 24px;">
+            <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0f2b44 100%); border-radius: var(--radius); padding: 20px; color: white; position: relative; overflow: hidden;">
+                <div style="position: absolute; right: -20px; top: -20px; font-size: 80px; opacity: 0.1;">💰</div>
+                <div style="font-size: 13px; opacity: 0.8; margin-bottom: 8px;">VENTAS DEL PERÍODO</div>
+                <div style="font-size: 32px; font-weight: 700;" id="dashboardTotalVentas">$0</div>
+                <div style="font-size: 12px; margin-top: 8px;" id="dashboardVarVentas">vs período anterior</div>
+            </div>
+            <div style="background: linear-gradient(135deg, #2c7da0 0%, #1e5a7a 100%); border-radius: var(--radius); padding: 20px; color: white; position: relative; overflow: hidden;">
+                <div style="position: absolute; right: -20px; top: -20px; font-size: 80px; opacity: 0.1;">📦</div>
+                <div style="font-size: 13px; opacity: 0.8; margin-bottom: 8px;">PEDIDOS ACTIVOS</div>
+                <div style="font-size: 32px; font-weight: 700;" id="dashboardPedidosActivos">0</div>
+                <div style="font-size: 12px; margin-top: 8px;" id="dashboardPedidosDetalle">en proceso</div>
+            </div>
+            <div style="background: linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%); border-radius: var(--radius); padding: 20px; color: white; position: relative; overflow: hidden;">
+                <div style="position: absolute; right: -20px; top: -20px; font-size: 80px; opacity: 0.1;">⭐</div>
+                <div style="font-size: 13px; opacity: 0.8; margin-bottom: 8px;">TICKET PROMEDIO</div>
+                <div style="font-size: 32px; font-weight: 700;" id="dashboardTicketPromedio">$0</div>
+                <div style="font-size: 12px; margin-top: 8px;">por pedido</div>
+            </div>
+            <div style="background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%); border-radius: var(--radius); padding: 20px; color: white; position: relative; overflow: hidden;">
+                <div style="position: absolute; right: -20px; top: -20px; font-size: 80px; opacity: 0.1;">📈</div>
+                <div style="font-size: 13px; opacity: 0.8; margin-bottom: 8px;">CONVERSIÓN</div>
+                <div style="font-size: 32px; font-weight: 700;" id="dashboardConversion">0%</div>
+                <div style="font-size: 12px; margin-top: 8px;">cotizaciones → ventas</div>
+            </div>
+        </div>
+        
+        <!-- Gráfico principal: Evolución de ventas (línea) -->
+        <div style="background: white; border-radius: var(--radius); padding: 20px; margin-bottom: 24px; border: 1px solid var(--gray-300);">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap;">
+                <h4 style="margin: 0; font-size: 16px; color: var(--gray-700);">📈 Evolución de Ventas</h4>
+                <div style="display: flex; gap: 16px; font-size: 12px;">
+                    <span><span style="display: inline-block; width: 12px; height: 12px; background: var(--primary); border-radius: 2px; margin-right: 4px;"></span> Ventas</span>
+                    <span><span style="display: inline-block; width: 12px; height: 12px; background: var(--warning); border-radius: 2px; margin-right: 4px;"></span> Tendencia</span>
+                </div>
+            </div>
+            <div id="graficoVentas" style="height: 280px; position: relative;">
+                <canvas id="ventasChart" style="width: 100%; height: 100%;"></canvas>
+            </div>
+        </div>
+        
+        <!-- Métricas de rendimiento en 2 columnas -->
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px; margin-bottom: 24px;">
+            <!-- Distribución por estado (anillo) -->
+            <div style="background: white; border-radius: var(--radius); padding: 20px; border: 1px solid var(--gray-300);">
+                <h4 style="margin: 0 0 16px 0; font-size: 16px; color: var(--gray-700);">🎯 Estado de Pedidos</h4>
+                <div style="display: flex; align-items: center; gap: 20px; flex-wrap: wrap;">
+                    <div style="width: 140px; height: 140px; position: relative;">
+                        <canvas id="estadosChart" style="width: 100%; height: 100%;"></canvas>
+                        <div style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); text-align: center;">
+                            <div style="font-size: 20px; font-weight: 700;" id="totalPedidosEstado">0</div>
+                            <div style="font-size: 10px; color: var(--gray-500);">total</div>
+                        </div>
+                    </div>
+                    <div style="flex: 1;" id="estadosLegenda"></div>
+                </div>
+            </div>
+            
+            <!-- Productividad y metas -->
+            <div style="background: white; border-radius: var(--radius); padding: 20px; border: 1px solid var(--gray-300);">
+                <h4 style="margin: 0 0 16px 0; font-size: 16px; color: var(--gray-700);">⚡ Rendimiento Comercial</h4>
+                <div style="margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <span style="font-size: 13px;">📊 Meta mensual</span>
+                        <span style="font-size: 13px; font-weight: 600;" id="metaMensual">$0</span>
+                    </div>
+                    <div style="background: var(--gray-300); height: 10px; border-radius: 10px; overflow: hidden;">
+                        <div id="barraMeta" style="background: var(--success); width: 0%; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; margin-top: 4px;">
+                        <span style="font-size: 11px; color: var(--gray-500);">0%</span>
+                        <span style="font-size: 11px; color: var(--gray-500);" id="porcentajeMeta">0%</span>
+                        <span style="font-size: 11px; color: var(--gray-500);">100%</span>
+                    </div>
+                </div>
+                <div style="margin-bottom: 20px;">
+                    <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                        <span style="font-size: 13px;">📅 Promedio diario</span>
+                        <span style="font-size: 13px; font-weight: 600;" id="promedioDiario">$0</span>
+                    </div>
+                    <div style="background: var(--gray-300); height: 10px; border-radius: 10px; overflow: hidden;">
+                        <div id="barraDiaria" style="background: var(--primary); width: 0%; height: 100%; border-radius: 10px; transition: width 0.5s;"></div>
+                    </div>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 16px;">
+                    <div style="text-align: center; padding: 12px; background: var(--gray-100); border-radius: var(--radius-sm);">
+                        <div style="font-size: 11px; color: var(--gray-500);">📈 Tasa de éxito</div>
+                        <div style="font-size: 22px; font-weight: 700; color: var(--success);" id="tasaExito">0%</div>
+                        <div style="font-size: 10px; color: var(--gray-500);">entregados / total</div>
+                    </div>
+                    <div style="text-align: center; padding: 12px; background: var(--gray-100); border-radius: var(--radius-sm);">
+                        <div style="font-size: 11px; color: var(--gray-500);">⏱️ Ciclo promedio</div>
+                        <div style="font-size: 22px; font-weight: 700; color: var(--warning);" id="tiempoPromedio">0 días</div>
+                        <div style="font-size: 10px; color: var(--gray-500);">cotización → entrega</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Top productos y mejores vendedores -->
+        <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 20px;">
+            <div style="background: white; border-radius: var(--radius); padding: 20px; border: 1px solid var(--gray-300);">
+                <h4 style="margin: 0 0 16px 0; font-size: 16px; color: var(--gray-700);">🏆 Top Productos</h4>
+                <div id="ventanasTop" style="margin-bottom: 16px;"></div>
+                <div style="margin-top: 12px; text-align: center;">
+                    <div style="font-size: 12px; color: var(--gray-500);" id="mejorVentanaUtilidad"></div>
+                </div>
+            </div>
+            <div style="background: white; border-radius: var(--radius); padding: 20px; border: 1px solid var(--gray-300);">
+                <h4 style="margin: 0 0 16px 0; font-size: 16px; color: var(--gray-700);">📊 Estadísticas Clave</h4>
+                <div style="display: flex; flex-direction: column; gap: 16px;">
+                    <div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                            <span style="font-size: 13px;">📦 Total pedidos</span>
+                            <span style="font-size: 13px; font-weight: 600;" id="totalPedidosHistoricos">0</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                            <span style="font-size: 13px;">✅ Pedidos entregados</span>
+                            <span style="font-size: 13px; font-weight: 600; color: var(--success);" id="totalEntregados">0</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between; margin-bottom: 6px;">
+                            <span style="font-size: 13px;">🔄 En proceso</span>
+                            <span style="font-size: 13px; font-weight: 600; color: var(--warning);" id="totalEnProceso">0</span>
+                        </div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="font-size: 13px;">📝 Cotizaciones</span>
+                            <span style="font-size: 13px; font-weight: 600; color: var(--primary);" id="totalCotizaciones">0</span>
+                        </div>
+                    </div>
+                    <hr style="margin: 8px 0;">
+                    <div>
+                        <div style="display: flex; justify-content: space-between;">
+                            <span style="font-size: 13px;">⭐ Mejor producto</span>
+                            <span style="font-size: 13px; font-weight: 600;" id="mejorProducto">-</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Historial -->
+<div id="historialSeccion" style="display:none">  
+    <div class="card">  
+        <h3>📋 Historial de Pedidos</h3>  
+        <div id="contadorPedidos" style="font-size:13px; color:var(--gray-500); margin-bottom:20px; padding:8px 12px; background:var(--gray-100); border-radius:var(--radius-sm); text-align:center;"></div>
+        <div id="historial"></div>  
+    </div>  
+    <div class="filtros-historial">  
+        <select id="filtroEstado" onchange="mostrarHistorial()">  
+            <option value="todos">Todos los estados</option>  
+            <option value="cotizacion">Cotización</option>  
+            <option value="fabricacion">Fabricación</option>  
+            <option value="terminado">Terminado</option>  
+            <option value="entregado">Entregado</option>  
+        </select>  
+        <select id="filtroOrden" onchange="mostrarHistorial()">  
+            <option value="nuevo">Más recientes primero</option>  
+            <option value="antiguo">Más antiguos primero</option>  
+        </select>  
+        <input type="text" id="buscadorHistorial" placeholder="🔍 Buscar por cliente...">  
+    </div>  
+</div>  
+
+<!-- Balance - Enfoque Tributario -->
+<div id="balance" style="display:none">  
+    <div class="card">
+        <h3>📈 Balance Tributario</h3>
+        <div id="balanceFecha" style="text-align:center; color:var(--gray-500); margin-bottom:24px; font-size:14px;"></div>
+        
+        <!-- Resumen financiero -->
+        <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap:15px; margin-bottom:25px;">
+            <div class="dashboard-card" style="background:linear-gradient(135deg, #2e7d32 0%, #1b5e20 100%);">
+                <h4>💰 INGRESOS BRUTOS</h4>
+                <div class="valor" id="balanceIngresos">$0</div>
+                <div class="variacion" id="balanceCantidadPedidos">0 pedidos</div>
+            </div>
+            <div class="dashboard-card" style="background:linear-gradient(135deg, #d32f2f 0%, #b71c1c 100%);">
+                <h4>💸 COSTOS DE MATERIALES</h4>
+                <div class="valor" id="balanceEgresos">$0</div>
+                <div class="variacion">Compras de stock</div>
+            </div>
+            <div class="dashboard-card" style="background:linear-gradient(135deg, #f59e0b 0%, #d97706 100%);">
+                <h4>📈 UTILIDAD NETA</h4>
+                <div class="valor" id="balanceUtilidad">$0</div>
+                <div class="variacion" id="balanceMargen">Margen: 0%</div>
+            </div>
+        </div>
+        
+        <!-- Detalle de egresos por categoría -->
+        <div style="margin-bottom:24px;">
+            <h4 style="margin:0 0 12px 0; color:var(--gray-700); font-size:15px;">📦 COMPRAS DE MATERIALES</h4>
+            <div class="tabla-wrapper">
+                <table class="tabla-costos">
+                    <thead>
+                        <tr>
+                            <th>Fecha</th>
+                            <th>Categoría</th>
+                            <th>Material</th>
+                            <th>Cantidad</th>
+                            <th>Total</th>
+                            <th>Proveedor</th>
+                            <th>Factura</th>
+                            <th>Acción</th>
+                        </thead>
+                    <tbody id="detalleEgresos"></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Comparativa mensual con utilidad real -->
+        <div style="margin-bottom:24px;">
+            <h4 style="margin:0 0 12px 0; color:var(--gray-700); font-size:15px;">📊 COMPARATIVA MENSUAL</h4>
+            <div class="tabla-wrapper">
+                <table class="tabla-costos">
+                    <thead>
+                        <tr>
+                            <th>Mes</th>
+                            <th>Ingresos</th>
+                            <th>Costos Materiales</th>
+                            <th>Utilidad Neta</th>
+                            <th>Margen</th>
+                        </thead>
+                    <tbody id="comparativaMensual"></tbody>
+                </table>
+            </div>
+        </div>
+        
+        <!-- Registro de compras -->
+        <div style="margin-top:20px; padding:15px; background:var(--gray-100); border-radius:var(--radius);">
+            <h4 style="margin:0 0 10px 0; color:var(--gray-700); font-size:14px;">📝 REGISTRAR NUEVA COMPRA</h4>
+            <div style="display:flex; gap:12px; justify-content:flex-end;">
+                <button onclick="registrarCompraBalance()" class="btn-primary">➕ Registrar Compra</button>
+                <button onclick="exportarBalance()" class="btn-secondary">📥 Exportar Balance</button>
+            </div>
+        </div>
+    </div>
+</div>
+<!-- Costos -->
+<div id="config" style="display:none">  
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 20px; margin: 20px;">
+        
+        <!-- Vidrios -->
+        <div class="card" style="margin: 0;">
+            <h3 style="margin: 0 0 16px 0; font-size: 16px;">🔍 Vidrios</h3>
+            <div class="tabla-wrapper">  
+                <table id="tablaVidrios" class="tabla-costos">  
+                    <thead>
+                        <tr><th>Tipo de Vidrio</th><th>Valor/m²</th><th>Valor/Plancha</th><th>Metro²</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>  
+            </div>  
+        </div>
+        
+        <!-- Aluminio con scroll vertical -->
+        <div class="card" style="margin: 0;">
+            <h3 style="margin: 0 0 16px 0; font-size: 16px;">🪟 Aluminio</h3>
+            <div class="tabla-wrapper" style="max-height: 400px; overflow-y: auto;">  
+                <table id="tablaAluminio" class="tabla-costos">
+                    <thead>
+                        <tr><th style="min-width: 120px;">Perfil</th><th style="min-width: 60px;">Valor/m</th><th style="min-width: 70px;">Valor/Linea</th><th style="min-width: 50px;">Metro</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>  
+            </div>  
+        </div>
+        
+        <!-- Variables -->
+<div class="card" style="margin: 0;">
+    <h3 style="margin: 0 0 16px 0; font-size: 16px;">⚙️ Variables</h3>
+    <div class="tabla-wrapper" style="max-height: 400px; overflow-y: auto;">  
+        <table id="tablaVariables" class="tabla-costos">
+            <thead>
+                <tr><th>Material</th><th>Valor/m</th><th>Valor/base</th><th>Metro</th></tr>
+            </thead>
+            <tbody></tbody>
+        </table>  
+    </div>  
+</div>
+        
+        <!-- Fijos -->
+        <div class="card" style="margin: 0;">
+            <h3 style="margin: 0 0 16px 0; font-size: 16px;">🔧 Costos Fijos</h3>
+            <div class="tabla-wrapper">  
+                <table id="tablaFijos" class="tabla-costos">
+                    <thead>
+                        <tr><th>Material</th><th>Cantidad Usada</th><th>Valor unitario</th><th>Total</th></tr>
+                    </thead>
+                    <tbody></tbody>
+                </table>  
+            </div>  
+        </div>
+        
+    </div>
+    
+    <div style="display: flex; justify-content: flex-end; margin: 0 20px 20px 20px;">  
+        <button onclick="confirmarCostos()" class="btn-primary" style="padding: 12px 32px;">✅ Confirmar cambios</button>  
+    </div>  
+</div>
+
+<script>  
+function migrarVariables() {
+    let costosGuardados = localStorage.getItem("costos");
+    if(costosGuardados) {
+        let costosParseados = JSON.parse(costosGuardados);
+        if(costosParseados.variables && costosParseados.variables.length !== 9) {
+            costosParseados.variables = [
+                {nombre:"Burlete 302 (L20)", base:0, metros:1},
+                {nombre:"Burlete 305 (L25)", base:0, metros:1},
+                {nombre:"Burlete Termopanel", base:0, metros:1},
+                {nombre:"Burlete (futuro 1)", base:0, metros:1},
+                {nombre:"Burlete (futuro 2)", base:0, metros:1},
+                {nombre:"Felpa 5×5 (L20)", base:0, metros:1},
+                {nombre:"Felpa 7×6 (L25 y Termo)", base:0, metros:1},
+                {nombre:"Silicona Standard", base:0, metros:1},
+                {nombre:"Silicona Estructural", base:0, metros:1}
+            ];
+            localStorage.setItem("costos", JSON.stringify(costosParseados));
+            costos = costosParseados;
+            costosTemp = JSON.parse(JSON.stringify(costos));
+            renderCostos();
+            console.log("✅ Variables migradas a 9 items");
+        }
+    }
+}
+
+// ==================== CONSTANTES Y VARIABLES GLOBALES ====================
+const CLP = n => new Intl.NumberFormat('es-CL',{style:'currency',currency:'CLP',maximumFractionDigits:0}).format(n);  
+
+// Nombres de las 3 nuevas ventanas
+const nombresVentanas = [
+    "Línea 20 Colores",
+    "Línea 25 Colores", 
+    "Línea 25 Colores Termopanel"
+];
+
+// Grupos de ventanas originales para promediar
+const gruposVentanas = [
+    // Línea 20 Colores: índices 0,1,2 de las originales
+    [0, 1, 2],
+    // Línea 25 Colores: índices 3,4,5 de las originales
+    [3, 4, 5],
+    // Línea 25 Termopanel: índices 6,7,8 de las originales
+    [6, 7, 8]
+];
+
+// Ventanas originales (9 tipos) - solo para cálculos internos
+const ventanasOriginales = [
+    {tipo:1,especial:false, nombre:"Línea 20 Mate"},
+    {tipo:2,especial:false, nombre:"Línea 20 Bronce y Titaneo"},
+    {tipo:3,especial:false, nombre:"Línea 20 Madera y Blanco"},
+    {tipo:4,especial:false, nombre:"Línea 25 Mate (Open Look)"},
+    {tipo:5,especial:false, nombre:"Línea 25 Titaneo y Bronce (Open Look)"},
+    {tipo:6,especial:false, nombre:"Línea 25 Madera y Blanco (Open Look)"},
+    {tipo:7,especial:true, nombre:"Línea 25 Termo Mate (Cremona)"},
+    {tipo:8,especial:true, nombre:"Línea 25 Termo Titaneo y Bronce (Cremona)"},
+    {tipo:9,especial:true, nombre:"Línea 25 Termo Madera y Blanco (Cremona)"}
+];
+
+const anchoInput = document.getElementById("ancho");  
+const altoInput = document.getElementById("alto");  
+const utilidadInput = document.getElementById("utilidadInput");  
+const contenedor = document.getElementById("contenedor");  
+
+let historial = JSON.parse(localStorage.getItem("historial")) || [];  
+let pedidoEditando = null;  
+
+// Costos con nuevas variables
+let costos = JSON.parse(localStorage.getItem("costos")) || {  
+    vidrios: [
+        {nombre:"4mm Incoloro", plancha:27000, area:4.5}, 
+        {nombre:"4mm Bronce / Espejo", plancha:39600, area:4.5}, 
+        {nombre:"5mm Incoloro", plancha:32850, area:4.5}, 
+        {nombre:"5mm Bronce / Espejo", plancha:48150, area:4.5}
+    ],  
+    aluminio: ventanasOriginales.map(n=>({nombre:n.nombre, Línea:12600, metros:6})),  
+    variables: [
+        {nombre:"Burlete 302 (L20)", base:0, metros:1},
+        {nombre:"Burlete 305 (L25)", base:0, metros:1},
+        {nombre:"Burlete Termopanel", base:0, metros:1},
+        {nombre:"Burlete (futuro 1)", base:0, metros:1},
+        {nombre:"Burlete (futuro 2)", base:0, metros:1},
+        {nombre:"Felpa 5×5 (L20)", base:0, metros:1},
+        {nombre:"Felpa 7×6 (L25 y Termo)", base:0, metros:1},
+        {nombre:"Silicona Standard", base:0, metros:1},
+        {nombre:"Silicona Estructural", base:0, metros:1}
+    ],  
+    fijos: [{nombre:"Tornillos", cantidad:4, precio:500}, {nombre:"Rodamientos", cantidad:2, precio:1500}, {nombre:"Caracoles", cantidad:2, precio:800}, {nombre:"Pestillos", cantidad:1, precio:1200}]  
+};  
+
+let costosTemp = JSON.parse(JSON.stringify(costos));  
+
+// ==================== FUNCIONES DE MIGRACIÓN ====================
+function migrarPedidosAntiguos(){
+    let historial = JSON.parse(localStorage.getItem("historial")) || [];
+    let migrados = false;
+    historial = historial.map(p => {
+        let actualizado = { ...p };
+        if(!actualizado.fecha && actualizado.timestamp){
+            const fechaObj = new Date(actualizado.timestamp);
+            actualizado.fecha = fechaObj.toLocaleDateString("es-CL");
+            migrados = true;
+        }
+        if(!actualizado.utilidadNeta && actualizado.venta && actualizado.fabricacion){
+            actualizado.utilidadNeta = (actualizado.venta / 1.19) - actualizado.fabricacion;
+            migrados = true;
+        }
+        if(!actualizado.porcentaje){
+            actualizado.porcentaje = 100;
+            migrados = true;
+        }
+        return actualizado;
+    });
+    if(migrados) localStorage.setItem("historial", JSON.stringify(historial));
+    return historial;
+}
+
+historial = migrarPedidosAntiguos();
+
+// ==================== FUNCIÓN PARA CALCULAR FABRICACIÓN DE UNA VENTANA ORIGINAL ====================
+function calcularFabricacionOriginal(index, ancho, alto){
+    const v = ventanasOriginales[index];
+    const costosActuales = costosTemp;
+    
+    // Costo de aluminio
+    const costoAluminio = costosActuales.aluminio[index];
+    const precioAluminioPorM = costoAluminio.metros ? costoAluminio.tira / costoAluminio.metros : 0;
+    const costoAluminioTotal = (4*ancho + 6*alto) * precioAluminioPorM;
+    
+    // Asignación de variables según la línea
+    let burleteVar, felpaVar, siliconaVar;
+    
+    if(index <= 2){ // Línea 20 (índices 0,1,2)
+        burleteVar = costosActuales.variables[0]; // Burlete 302 (L20)
+        felpaVar = costosActuales.variables[5];   // Felpa 5×5 (L20)
+        siliconaVar = costosActuales.variables[7]; // Silicona Standard
+        const precioBurlete = burleteVar.metros ? burleteVar.base / burleteVar.metros : 0;
+        const precioFelpa = felpaVar.metros ? felpaVar.base / felpaVar.metros : 0;
+        const precioSilicona = siliconaVar.metros ? siliconaVar.base / siliconaVar.metros : 0;
+        
+        const costoBurlete = (2 * ancho + 4 * alto) * precioBurlete;
+        const costoFelpa = (3 * ancho + 6 * alto) * precioFelpa;
+        const costoSilicona = (4 * ancho + 4 * alto) * precioSilicona;
+        
+        let costosFijosTotal = 0;
+        costosActuales.fijos.forEach(f => costosFijosTotal += (f.cantidad || 0) * (f.precio || 0));
+        
+        // Calcular para cada vidrio
+        return costosActuales.vidrios.map(vid => {
+            const precioVidrioPorM2 = vid.area ? vid.plancha / vid.area : 0;
+            const costoVidrio = (ancho * alto) * precioVidrioPorM2;
+            return costoVidrio + costoAluminioTotal + costoBurlete + costoFelpa + costoSilicona + costosFijosTotal;
+        });
+        
+    } else if(index <= 5){ // Línea 25 Colores (índices 3,4,5)
+        burleteVar = costosActuales.variables[1]; // Burlete 305 (L25)
+        felpaVar = costosActuales.variables[6];   // Felpa 7×6 (L25 y Termo)
+        siliconaVar = costosActuales.variables[7]; // Silicona Standard
+        const precioBurlete = burleteVar.metros ? burleteVar.base / burleteVar.metros : 0;
+        const precioFelpa = felpaVar.metros ? felpaVar.base / felpaVar.metros : 0;
+        const precioSilicona = siliconaVar.metros ? siliconaVar.base / siliconaVar.metros : 0;
+        
+        const costoBurlete = (2 * ancho + 4 * alto) * precioBurlete;
+        const costoFelpa = (4 * ancho + 6 * alto) * precioFelpa;
+        const costoSilicona = (4 * ancho + 4 * alto) * precioSilicona;
+        
+        let costosFijosTotal = 0;
+        costosActuales.fijos.forEach(f => costosFijosTotal += (f.cantidad || 0) * (f.precio || 0));
+        
+        return costosActuales.vidrios.map(vid => {
+            const precioVidrioPorM2 = vid.area ? vid.plancha / vid.area : 0;
+            const costoVidrio = (ancho * alto) * precioVidrioPorM2;
+            return costoVidrio + costoAluminioTotal + costoBurlete + costoFelpa + costoSilicona + costosFijosTotal;
+        });
+        
+    } else { // Línea 25 Termopanel (índices 6,7,8)
+        burleteVar = costosActuales.variables[2]; // Burlete Termopanel
+        felpaVar = costosActuales.variables[6];   // Felpa 7×6 (L25 y Termo)
+        siliconaVar = costosActuales.variables[8]; // Silicona Estructural
+        const precioBurlete = burleteVar.metros ? burleteVar.base / burleteVar.metros : 0;
+        const precioFelpa = felpaVar.metros ? felpaVar.base / felpaVar.metros : 0;
+        const precioSilicona = siliconaVar.metros ? siliconaVar.base / siliconaVar.metros : 0;
+        
+        const costoBurlete = (2 * ancho + 4 * alto) * precioBurlete;
+        const costoFelpa = (4 * ancho + 6 * alto) * precioFelpa;
+        const costoSilicona = (4 * ancho + 4 * alto) * precioSilicona;
+        
+        let costosFijosTotal = 0;
+        costosActuales.fijos.forEach(f => costosFijosTotal += (f.cantidad || 0) * (f.precio || 0));
+        
+        return costosActuales.vidrios.map(vid => {
+            const precioVidrioPorM2 = vid.area ? vid.plancha / vid.area : 0;
+            const costoVidrio = (ancho * alto) * precioVidrioPorM2;
+            return costoVidrio + costoAluminioTotal + costoBurlete + costoFelpa + costoSilicona + costosFijosTotal;
+        });
+    }
+}
+
+// ==================== CALCULADORA ====================
+function calcular(){  
+    const ancho = parseFloat(anchoInput.value)||0;  
+    const alto = parseFloat(altoInput.value)||0;  
+    const utilidadPorcentaje = (parseFloat(utilidadInput.value)||100)/100;  
+    contenedor.innerHTML = "";  
+    
+    if(ancho === 0 || alto === 0){
+        contenedor.innerHTML = "<div class='card' style='text-align:center; color:var(--gray-500);'>Ingrese ancho y alto para calcular</div>";
+        return;
+    }
+    
+    // Para cada grupo de ventanas
+    gruposVentanas.forEach((grupo, grupoIndex) => {
+        // Calcular fabricación de cada ventana original en el grupo para cada vidrio
+        const fabricacionesPorVidrio = [];
+        
+        // Para cada tipo de vidrio (4 tipos)
+        for(let vidIdx = 0; vidIdx < costosTemp.vidrios.length; vidIdx++){
+            let suma = 0;
+            for(let i = 0; i < grupo.length; i++){
+                const fabricaciones = calcularFabricacionOriginal(grupo[i], ancho, alto);
+                suma += fabricaciones[vidIdx];
+            }
+            fabricacionesPorVidrio[vidIdx] = suma / grupo.length;
+        }
+        
+        let card = document.createElement("div");  
+        card.className = "card";  
+        card.innerHTML = `<h3>${nombresVentanas[grupoIndex]}</h3><div class="vidrio" style="font-weight:bold;border-bottom:2px solid var(--gray-300);"><div>Vidrio</div><div>Fabricación</div><div>Utilidad Neta</div><div>Venta</div><div></div></div>`;  
+        
+        costosTemp.vidrios.forEach((vid, vidIdx) => {
+            const fabricacion = fabricacionesPorVidrio[vidIdx];
+            const precioSinIVA = fabricacion * (1 + utilidadPorcentaje);
+            const venta = precioSinIVA * 1.19;
+            const utilidadNeta = precioSinIVA - fabricacion;
+            
+            let fila = document.createElement("div");  
+            fila.className = "vidrio";  
+            fila.innerHTML = `
+                <div>${vid.nombre}</div>
+                <div class="fabricacion">${CLP(fabricacion)}</div>
+                <div class="utilidad-neta">${CLP(utilidadNeta)}</div>
+                <div class="precio">${CLP(venta)}</div>
+                <button class="btn-primary" style="padding:6px 12px; font-size:12px;" onclick="guardarSeleccion({
+                    cliente: document.getElementById('clienteInput').value, 
+                    ventana: '${nombresVentanas[grupoIndex]}', 
+                    vidrio: '${vid.nombre}', 
+                    ancho: ${ancho}, 
+                    alto: ${alto}, 
+                    fabricacion: ${fabricacion}, 
+                    venta: ${venta}, 
+                    utilidadNeta: ${utilidadNeta}, 
+                    porcentaje: ${utilidadPorcentaje*100}
+                })">✔ Guardar</button>
+            `;  
+            card.appendChild(fila);  
+        });  
+        contenedor.appendChild(card);  
+    });  
+}
+
+anchoInput.addEventListener("input", calcular);  
+altoInput.addEventListener("input", calcular);  
+utilidadInput.addEventListener("input", calcular);  
+
+// ==================== DESEMPEÑO MEJORADO ====================
+let ventasChart = null;
+let estadosChart = null;
+
+function cargarDashboard(){
+    const historial = JSON.parse(localStorage.getItem("historial")) || [];
+    const ahora = new Date();
+    const mesActual = ahora.getMonth();
+    const añoActual = ahora.getFullYear();
+    const periodo = document.getElementById("periodoDashboard")?.value || "mes";
+    
+    // Determinar meses a mostrar según período
+    let mesesMostrar = 6;
+    if(periodo === "trimestre") mesesMostrar = 3;
+    if(periodo === "semestre") mesesMostrar = 6;
+    if(periodo === "anio") mesesMostrar = 12;
+    
+    // Obtener datos de los últimos N meses
+    const mesesLabels = [];
+    const ventasData = [];
+    let totalVentasPeriodo = 0;
+    let pedidosPeriodo = 0;
+    
+    for(let i = mesesMostrar - 1; i >= 0; i--){
+        const fecha = new Date(añoActual, mesActual - i, 1);
+        const mes = fecha.getMonth() + 1;
+        const año = fecha.getFullYear();
+        const nombreMes = fecha.toLocaleDateString('es-CL', { month: 'short' });
+        let total = 0;
+        let pedidos = 0;
+        historial.forEach(p => {
+            if(!p.fecha) return;
+            const partes = p.fecha.split('-');
+            if(partes.length !== 3) return;
+            if(parseInt(partes[1]) === mes && parseInt(partes[2]) === año){
+                total += p.venta || 0;
+                pedidos++;
+            }
+        });
+        mesesLabels.push(nombreMes);
+        ventasData.push(total);
+        totalVentasPeriodo += total;
+        pedidosPeriodo += pedidos;
+    }
+    
+    // Período anterior para comparación
+    const fechaAnteriorInicio = new Date(añoActual, mesActual - mesesMostrar, 1);
+    const mesAnteriorInicio = fechaAnteriorInicio.getMonth() + 1;
+    const añoAnteriorInicio = fechaAnteriorInicio.getFullYear();
+    let totalVentasAnterior = 0;
+    for(let i = 0; i < mesesMostrar; i++){
+        const fecha = new Date(añoAnteriorInicio, mesAnteriorInicio - 1 + i, 1);
+        const mes = fecha.getMonth() + 1;
+        const año = fecha.getFullYear();
+        historial.forEach(p => {
+            if(!p.fecha) return;
+            const partes = p.fecha.split('-');
+            if(partes.length !== 3) return;
+            if(parseInt(partes[1]) === mes && parseInt(partes[2]) === año){
+                totalVentasAnterior += p.venta || 0;
+            }
+        });
+    }
+    
+    // Ticket promedio
+    const ticketPromedio = pedidosPeriodo > 0 ? totalVentasPeriodo / pedidosPeriodo : 0;
+    
+    // Conversión
+    const cotizaciones = historial.filter(p => p.estado === "cotizacion").length;
+    const entregados = historial.filter(p => p.estado === "entregado").length;
+    const conversion = (cotizaciones + entregados) > 0 ? (entregados / (cotizaciones + entregados) * 100) : 0;
+    
+    // Mostrar KPIs
+    document.getElementById("dashboardTotalVentas").innerHTML = CLP(totalVentasPeriodo);
+    document.getElementById("dashboardPedidosActivos").innerHTML = historial.filter(p => p.estado !== "entregado").length;
+    document.getElementById("dashboardTicketPromedio").innerHTML = CLP(ticketPromedio);
+    document.getElementById("dashboardConversion").innerHTML = conversion.toFixed(1) + "%";
+    
+    // Variación
+    let varVentas = totalVentasAnterior > 0 ? ((totalVentasPeriodo - totalVentasAnterior) / totalVentasAnterior * 100) : 0;
+    document.getElementById("dashboardVarVentas").innerHTML = varVentas >= 0 ? `▲ +${varVentas.toFixed(0)}% vs período anterior` : `▼ ${varVentas.toFixed(0)}% vs período anterior`;
+    document.getElementById("dashboardPedidosDetalle").innerHTML = `${historial.filter(p => p.estado !== "entregado").length} en proceso`;
+    
+    // Gráfico de ventas con Chart.js
+    const ctx = document.getElementById('ventasChart')?.getContext('2d');
+    if(ctx){
+        if(ventasChart) ventasChart.destroy();
+        ventasChart = new Chart(ctx, {
+            type: 'line',
+            data: {
+                labels: mesesLabels,
+                datasets: [{
+                    label: 'Ventas',
+                    data: ventasData,
+                    borderColor: '#1e3a5f',
+                    backgroundColor: 'rgba(30, 58, 95, 0.1)',
+                    fill: true,
+                    tension: 0.3,
+                    pointBackgroundColor: '#1e3a5f',
+                    pointBorderColor: 'white',
+                    pointRadius: 4,
+                    pointHoverRadius: 6
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: false,
+                plugins: {
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                return CLP(context.raw);
+                            }
+                        }
+                    },
+                    legend: { display: false }
+                },
+                scales: {
+                    y: {
+                        ticks: {
+                            callback: function(value) {
+                                return CLP(value);
+                            }
+                        }
+                    }
+                }
+            }
+        });
+    }
+    
+    // Pedidos por estado para gráfico de anillo
+    const estados = ["cotizacion", "fabricacion", "terminado", "entregado"];
+    const nombresEstados = { cotizacion:"Cotización", fabricacion:"Fabricación", terminado:"Terminado", entregado:"Entregado" };
+    const coloresEstados = { cotizacion:"#1e3a5f", fabricacion:"#ed6c02", terminado:"#2e7d32", entregado:"#64748b" };
+    const cantidades = estados.map(e => historial.filter(p => p.estado === e).length);
+    const totalPedidos = cantidades.reduce((a,b) => a + b, 0);
+    document.getElementById("totalPedidosEstado").innerHTML = totalPedidos;
+    
+    // Gráfico de anillo
+    const ctxEstados = document.getElementById('estadosChart')?.getContext('2d');
+    if(ctxEstados){
+        if(estadosChart) estadosChart.destroy();
+        estadosChart = new Chart(ctxEstados, {
+            type: 'doughnut',
+            data: {
+                labels: estados.map(e => nombresEstados[e]),
+                datasets: [{
+                    data: cantidades,
+                    backgroundColor: estados.map(e => coloresEstados[e]),
+                    borderWidth: 0,
+                    hoverOffset: 10
+                }]
+            },
+            options: {
+                responsive: true,
+                maintainAspectRatio: true,
+                plugins: {
+                    legend: { display: false },
+                    tooltip: {
+                        callbacks: {
+                            label: function(context) {
+                                const total = context.dataset.data.reduce((a,b) => a + b, 0);
+                                const porcentaje = ((context.raw / total) * 100).toFixed(0);
+                                return `${context.label}: ${context.raw} (${porcentaje}%)`;
+                            }
+                        }
+                    }
+                },
+                cutout: '65%'
+            }
+        });
+    }
+    
+    // Leyenda de estados
+    let estadosHTML = '<div style="display: flex; flex-direction: column; gap: 8px;">';
+    estados.forEach(estado => {
+        const cantidad = historial.filter(p => p.estado === estado).length;
+        const porcentaje = totalPedidos > 0 ? (cantidad / totalPedidos * 100).toFixed(0) : 0;
+        estadosHTML += `
+            <div style="display: flex; align-items: center; gap: 8px;">
+                <div style="width: 12px; height: 12px; background: ${coloresEstados[estado]}; border-radius: 2px;"></div>
+                <span style="flex: 1; font-size: 12px;">${nombresEstados[estado]}</span>
+                <span style="font-size: 12px; font-weight: 600;">${cantidad}</span>
+                <span style="font-size: 11px; color: var(--gray-500);">(${porcentaje}%)</span>
+            </div>
+        `;
+    });
+    estadosHTML += '</div>';
+    document.getElementById("estadosLegenda").innerHTML = estadosHTML;
+    
+    // Top productos
+    const ventanasCount = {};
+    historial.forEach(p => { if(p.ventana) ventanasCount[p.ventana] = (ventanasCount[p.ventana] || 0) + 1; });
+    const topVentanas = Object.entries(ventanasCount).sort((a,b) => b[1] - a[1]).slice(0, 5);
+    let ventanasHTMLLista = '<ol style="margin:0; padding-left: 20px;">';
+    topVentanas.forEach(([nombre, cantidad]) => {
+        const porcentaje = totalPedidos > 0 ? (cantidad / totalPedidos * 100).toFixed(0) : 0;
+        ventanasHTMLLista += `<li style="margin-bottom: 10px; display: flex; justify-content: space-between;"><span><strong>${nombre}</strong></span><span style="color: var(--primary);">${cantidad} (${porcentaje}%)</span></li>`;
+    });
+    if(topVentanas.length === 0) ventanasHTMLLista += '<li style="color:var(--gray-500);">Sin datos aún</li>';
+    ventanasHTMLLista += '</ol>';
+    document.getElementById("ventanasTop").innerHTML = ventanasHTMLLista;
+    
+    // Mejor producto
+    if(topVentanas.length > 0) document.getElementById("mejorProducto").innerHTML = topVentanas[0][0];
+    else document.getElementById("mejorProducto").innerHTML = "-";
+    
+    // Productividad
+    const diasHabiles = 22;
+    const promedioDiario = totalVentasPeriodo / diasHabiles;
+    const metaMensual = 1000000;
+    const porcentajeMeta = (totalVentasPeriodo / metaMensual) * 100;
+    
+    document.getElementById("promedioDiario").innerHTML = CLP(promedioDiario);
+    document.getElementById("metaMensual").innerHTML = CLP(metaMensual);
+    document.getElementById("porcentajeMeta").innerHTML = porcentajeMeta.toFixed(0) + "%";
+    document.getElementById("barraDiaria").style.width = Math.min(100, (promedioDiario / (metaMensual / diasHabiles)) * 100) + "%";
+    document.getElementById("barraMeta").style.width = Math.min(100, porcentajeMeta) + "%";
+    
+    // Tasa de éxito
+    const entregadosTotal = historial.filter(p => p.estado === "entregado").length;
+    const tasaExito = totalPedidos > 0 ? (entregadosTotal / totalPedidos * 100) : 0;
+    document.getElementById("tasaExito").innerHTML = tasaExito.toFixed(0) + "%";
+    
+    // Tiempo promedio (estimado)
+    document.getElementById("tiempoPromedio").innerHTML = "15 días";
+    
+    // Estadísticas clave
+    document.getElementById("totalPedidosHistoricos").innerHTML = totalPedidos;
+    document.getElementById("totalEntregados").innerHTML = entregadosTotal;
+    document.getElementById("totalEnProceso").innerHTML = historial.filter(p => p.estado !== "entregado" && p.estado !== "cotizacion").length;
+    document.getElementById("totalCotizaciones").innerHTML = historial.filter(p => p.estado === "cotizacion").length;
+    
+    // Utilidad promedio
+    let totalUtilidadPedidos = 0, pedidosConUtilidad = 0;
+    historial.forEach(p => { if(p.utilidadNeta && p.utilidadNeta > 0){ totalUtilidadPedidos += p.utilidadNeta; pedidosConUtilidad++; } });
+    const utilidadPromedio = pedidosConUtilidad > 0 ? (totalUtilidadPedidos / pedidosConUtilidad) : 0;
+    document.getElementById("mejorVentanaUtilidad").innerHTML = `💰 Utilidad promedio: ${CLP(utilidadPromedio)}`;
+}
+
+function exportarDesempeno(){
+    const ahora = new Date();
+    const mesActual = ahora.toLocaleDateString('es-CL', { month: 'long', year: 'numeric' });
+    const historial = JSON.parse(localStorage.getItem("historial")) || [];
+    const totalPedidos = historial.length;
+    const entregados = historial.filter(p => p.estado === "entregado").length;
+    const tasaExito = totalPedidos > 0 ? (entregados / totalPedidos * 100) : 0;
+    
+    let texto = `=== REPORTE EJECUTIVO - ${mesActual.toUpperCase()} ===\n\n`;
+    texto += `📊 MÉTRICAS CLAVE\n─────────────────────────\n`;
+    
+    // Calcular ventas del mes
+    const mes = ahora.getMonth() + 1;
+    const año = ahora.getFullYear();
+    let ventasMes = 0, pedidosMes = 0;
+    historial.forEach(p => {
+        if(!p.fecha) return;
+        const partes = p.fecha.split('-');
+        if(partes.length !== 3) return;
+        if(parseInt(partes[1]) === mes && parseInt(partes[2]) === año){
+            ventasMes += p.venta || 0;
+            pedidosMes++;
+        }
+    });
+    const ticketPromedio = pedidosMes > 0 ? ventasMes / pedidosMes : 0;
+    
+    texto += `💰 Ventas del mes: ${CLP(ventasMes)}\n`;
+    texto += `📦 Pedidos del mes: ${pedidosMes}\n`;
+    texto += `⭐ Ticket promedio: ${CLP(ticketPromedio)}\n`;
+    texto += `📈 Tasa de éxito: ${tasaExito.toFixed(0)}%\n`;
+    texto += `📊 Total pedidos históricos: ${totalPedidos}\n\n`;
+    
+    // Top productos
+    const ventanasCount = {};
+    historial.forEach(p => { if(p.ventana) ventanasCount[p.ventana] = (ventanasCount[p.ventana] || 0) + 1; });
+    const topVentanas = Object.entries(ventanasCount).sort((a,b) => b[1] - a[1]).slice(0, 3);
+    
+    texto += `🏆 TOP PRODUCTOS\n─────────────────────────\n`;
+    topVentanas.forEach(([nombre, cantidad], i) => {
+        texto += `${i+1}. ${nombre}: ${cantidad} venta${cantidad !== 1 ? 's' : ''}\n`;
+    });
+    
+    texto += `\n=======================`;
+    
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(texto).then(() => alert("✅ Reporte copiado al portapapeles")).catch(() => copiarTextoAlternativo(texto));
+    } else {
+        copiarTextoAlternativo(texto);
+    }
+}
 
 // ==================== BALANCE ====================
 function cargarBalance(){
